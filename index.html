@@ -325,7 +325,6 @@
       .day-display { text-align: left; }
     }
   </style>
-
 </head>
 <body>
   <!-- ANTI-THROTTLING SILENT AUDIO LOOP -->
@@ -715,7 +714,7 @@
     });
 
     // ==================================================
-    // AUDIO PLAYBACK ENGINE
+    // AUDIO PLAYBACK ENGINE (WITH MEDIA SESSION)
     // ==================================================
     let currentAudio = null;
     let currentAudioLabel = null;
@@ -726,6 +725,9 @@
         currentAudio.currentTime = 0;
         currentAudio = null;
         currentAudioLabel = null;
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = "none";
+        }
         statusEl.textContent = "Audio stopped manually.";
       }
     }
@@ -742,10 +744,24 @@
         currentAudioLabel = label;
         currentAudio.preload = "auto";
 
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: label,
+            artist: "Audio Scheduler",
+            album: "Kapiti Coast District Council"
+          });
+          navigator.mediaSession.playbackState = "playing";
+          navigator.mediaSession.setActionHandler('pause', () => stopAudio());
+          navigator.mediaSession.setActionHandler('stop', () => stopAudio());
+        }
+
         await currentAudio.play();
         statusEl.textContent = `Playing: ${label}`;
 
         currentAudio.onended = () => {
+          if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = "none";
+          }
           currentAudio = null;
           currentAudioLabel = null;
           statusEl.textContent = "Playback finished.";
@@ -807,7 +823,11 @@
         if (played) {
           localStorage.setItem(occurrenceId, "played");
         } else {
-          localStorage.removeItem(occurrenceId);
+          setTimeout(() => {
+            if (localStorage.getItem(occurrenceId) === "attempting") {
+              localStorage.removeItem(occurrenceId);
+            }
+          }, 60000);
         }
       });
     }
@@ -837,7 +857,6 @@
       const selectedAudio = audioFiles[audioIndex];
 
       if (editingScheduleId) {
-        // Update existing schedule
         const index = schedules.findIndex(s => s.id === editingScheduleId);
         if (index !== -1) {
           schedules[index].time = time;
@@ -846,7 +865,6 @@
         }
         alert("Schedule updated successfully!");
       } else {
-        // Create new schedule
         const newSchedule = {
           id: "sch_" + Date.now(),
           time: time,
@@ -940,9 +958,32 @@
     }
 
     // ==================================================
-    // SELF-HEALING SILENT AUDIO LOOP & STARTUP CHIME
+    // WAKE LOCK, KEEP-AWAKE, SILENT LOOP & STARTUP CHIME
     // ==================================================
     let chimePlayed = false;
+    let wakeLock = null;
+
+    async function enableCapacitorKeepAwake() {
+      try {
+        if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.KeepAwake) {
+          await window.Capacitor.Plugins.KeepAwake.keepAwake();
+          console.log("Capacitor KeepAwake activated successfully.");
+        }
+      } catch (err) {
+        console.warn("Capacitor KeepAwake unavailable or error:", err);
+      }
+    }
+
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+          console.log('Screen Wake Lock acquired.');
+        }
+      } catch (err) {
+        console.warn(`Wake Lock request failed: ${err.name}, ${err.message}`);
+      }
+    }
 
     function ensureSilenceLooping() {
       const silencePlayer = document.getElementById("silenceAudio");
@@ -960,9 +1001,14 @@
       }
     }
 
-    function playStartupChime() {
+    async function playStartupChime() {
       try {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+        }
+
         const oscillator = audioCtx.createOscillator();
         const gainNode = audioCtx.createGain();
 
@@ -982,11 +1028,22 @@
       }
     }
 
-    window.addEventListener("DOMContentLoaded", ensureSilenceLooping);
-
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) ensureSilenceLooping();
+    window.addEventListener("DOMContentLoaded", () => {
+      ensureSilenceLooping();
+      requestWakeLock();
+      enableCapacitorKeepAwake();
     });
+
+    document.addEventListener("visibilitychange", async () => {
+      if (!document.hidden) {
+        ensureSilenceLooping();
+        if (wakeLock === null) {
+          await requestWakeLock();
+        }
+        enableCapacitorKeepAwake();
+      }
+    });
+
     document.body.addEventListener("click", ensureSilenceLooping);
 
     setInterval(updateClock, 1000);
