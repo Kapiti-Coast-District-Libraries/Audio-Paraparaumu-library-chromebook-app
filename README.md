@@ -8,6 +8,7 @@ npm install @capacitor/core @capacitor/cli @capacitor/android
 npx cap init "Audio Scheduler" "com.library.audioscheduler" --web-dir www
 
 npx cap add android
+
 npx cap copy
 
 
