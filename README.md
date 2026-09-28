@@ -12,6 +12,7 @@ npx cap copy
 
 
 npm install @capacitor-community/keep-awake
+
 npx cap sync
 
 npx cap open android
